@@ -4,6 +4,7 @@ from config import TOKEN
 from database import db
 from game_logic import OthelloGame
 from keyboards import invite_keyboard, game_board_keyboard, main_menu_keyboard
+from stats import stats_manager
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -100,6 +101,9 @@ def handle_callback(call):
         if data == "new_game":
             bot.send_message(call.message.chat.id, "Use /newgame @username")
         
+        elif data == "scores":
+            handle_scores(call)
+        
         elif data.startswith("accept:"):
             handle_accept(call)
         
@@ -118,6 +122,26 @@ def handle_callback(call):
     except Exception as e:
         print(f"Error: {e}")
         bot.answer_callback_query(call.id, "Error")
+
+def handle_scores(call):
+    user_id = call.from_user.id
+    user_name = call.from_user.first_name
+    
+    stats_message = stats_manager.format_stats_message(user_id, user_name)
+    
+    try:
+        bot.edit_message_text(
+            stats_message,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id
+        )
+    except:
+        bot.send_message(
+            call.message.chat.id,
+            stats_message
+        )
+    
+    bot.answer_callback_query(call.id, "Statistics loaded")
 
 def handle_accept(call):
     _, invite_id = call.data.split(":")
