@@ -11,12 +11,13 @@ A Telegram bot for playing the classic board game Othello (Reversi) with friends
 - 💾 **Game state persistence** - Games are saved in SQLite database
 - 🏆 **Win detection** - Automatic winner determination
 - 🔄 **Game status tracking** - Check current game status anytime
+- 🤖 **Beginner AI opponent** - Play against a simple AI if you don’t have a friend online
 
 ## How to Play
 
 ### Basic Commands:
 - `/start` - Start the bot and see main menu
-- `/newgame @username` - Invite a friend to play
+- `/newgame` - Choose the game type (against human or AI)
 - `/status` - Check your current game status
 - `/help` - Show game rules and instructions
 
