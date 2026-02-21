@@ -46,3 +46,14 @@ def main_menu_keyboard():
         InlineKeyboardButton("📊 Scores", callback_data="scores")
     )
     return keyboard
+
+def game_mode_keyboard():
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton("👤 Play with Friend", callback_data="play_friend"),
+        InlineKeyboardButton("🤖 Play with AI", callback_data="play_ai")
+    )
+    keyboard.add(
+        InlineKeyboardButton("⬅️ Back", callback_data="main_menu")
+    )
+    return keyboard
