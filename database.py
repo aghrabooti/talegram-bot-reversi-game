@@ -132,13 +132,15 @@ class Database:
         self.conn.commit()
     
     def end_game(self, game_id, winner):
-        winner_text = None
-        if winner == 1:
-            winner_text = "player1"
-        elif winner == 2:
-            winner_text = "player2"
-        elif winner == 0:
-            winner_text = "draw"
+        winner_text = winner
+        
+        if isinstance(winner, int):
+            if winner == 0:
+                winner_text = "draw"
+            elif winner == 1:
+                winner_text = "player1"
+            elif winner == 2:
+                winner_text = "player2"
         
         self.cur.execute(
             "UPDATE games SET status='ended', winner=? WHERE id=?",
