@@ -1,14 +1,17 @@
 import telebot
 import json
+import time
 from config import TOKEN
 from database import db
 from game_logic import OthelloGame
-from keyboards import invite_keyboard, game_board_keyboard, main_menu_keyboard
-from stats import stats_manager
+from keyboards import invite_keyboard, game_board_keyboard, main_menu_keyboard, game_mode_keyboard
+from ai_player import BeginnerAI
+
 
 bot = telebot.TeleBot(TOKEN)
-
+    
 game_messages = {}
+ai_games = {}
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -18,7 +21,7 @@ def start_command(message):
     
     db.register_user(user_id, username, first_name)
     
-    text = "Othello Bot\n\nCommands:\n/newgame @username - Start game\n/status - Current game"
+    text = "Othello Bot\n\nCommands:\n/newgame - Start new game\n/status - Current game"
     bot.send_message(message.chat.id, text, reply_markup=main_menu_keyboard())
 
 @bot.message_handler(commands=['newgame'])
@@ -27,7 +30,7 @@ def new_game_command(message):
     parts = text.split()
     
     if len(parts) < 2:
-        bot.reply_to(message, "Use: /newgame @username")
+        bot.send_message(message.chat.id, "Choose game mode:", reply_markup=game_mode_keyboard())
         return
     
     username_input = parts[1]
@@ -99,7 +102,31 @@ def handle_callback(call):
         data = call.data
         
         if data == "new_game":
-            bot.send_message(call.message.chat.id, "Use /newgame @username")
+            bot.edit_message_text(
+                "Choose game mode:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=game_mode_keyboard()
+            )
+        
+        elif data == "main_menu":
+            text = "Othello Bot\n\nCommands:\n/newgame - Start new game\n/status - Current game"
+            bot.edit_message_text(
+                text,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=main_menu_keyboard()
+            )
+        
+        elif data == "play_friend":
+            bot.edit_message_text(
+                "To play with a friend:\nUse /newgame @username",
+                call.message.chat.id,
+                call.message.message_id
+            )
+        
+        elif data == "play_ai":
+            start_ai_game(call)
         
         elif data == "scores":
             handle_scores(call)
@@ -122,6 +149,58 @@ def handle_callback(call):
     except Exception as e:
         print(f"Error: {e}")
         bot.answer_callback_query(call.id, "Error")
+
+def start_ai_game(call):
+    user_id = call.from_user.id
+    user_name = call.from_user.first_name
+    
+    active = db.get_user_active_game(user_id)
+    if active:
+        bot.answer_callback_query(call.id, "You have active game")
+        return
+    
+    ai_player = BeginnerAI(2)
+    
+    game_id = db.create_game(
+        user_id,
+        999999999,
+        user_name,
+        ai_player.name
+    )
+    
+    game = db.get_game(game_id)
+    game_logic = OthelloGame(
+        json.loads(game['board_state']),
+        game['current_player']
+    )
+    
+    ai_games[game_id] = ai_player
+    
+    moves = game_logic.get_valid_moves(game_logic.current_player)
+    black_score, white_score = game_logic.get_scores()
+    
+    text = f"Game #{game_id}\n\n"
+    text += f"⚫ {user_name}: {black_score}\n"
+    text += f"⚪ {ai_player.name}: {white_score}\n\n"
+    text += f"Turn: {game_logic.player_names[game_logic.current_player]}"
+    
+    keyboard = game_board_keyboard(game_id, moves, game_logic.board)
+    
+    try:
+        message = bot.send_message(
+            user_id,
+            text,
+            reply_markup=keyboard
+        )
+        game_messages[game_id] = {user_id: message.message_id}
+    except:
+        pass
+    
+    bot.answer_callback_query(call.id, "AI game started")
+    
+    if game_logic.current_player == 2:
+        time.sleep(1)
+        make_ai_move(game_id, game_logic, game)
 
 def handle_scores(call):
     user_id = call.from_user.id
@@ -272,11 +351,14 @@ def handle_move(call):
         winner = game_logic.get_winner()
         if winner == 0:
             result = "Draw"
+            db.end_game(game_id, "draw")
         else:
             winner_name = game['player1_name'] if winner == 1 else game['player2_name']
             result = f"Winner: {winner_name}"
-        
-        db.end_game(game_id, winner)
+            if winner == 1:
+                db.end_game(game_id, "player1")
+            else:
+                db.end_game(game_id, "player2")
         
         final_text = f"Game Over\n\n"
         final_text += f"⚫ {game['player1_name']}: {black_score}\n"
@@ -294,9 +376,94 @@ def handle_move(call):
                 except:
                     pass
         
+        if game_id in ai_games:
+            del ai_games[game_id]
+        
         bot.answer_callback_query(call.id, "Game over")
     else:
         bot.answer_callback_query(call.id, "Move made")
+        
+        if game_id in ai_games:
+            time.sleep(1)
+            make_ai_move(game_id, game_logic, game)
+
+def make_ai_move(game_id, game_logic, game):
+    if game_id not in ai_games:
+        return
+    
+    ai_player = ai_games[game_id]
+    
+    if game_logic.current_player != ai_player.player_color:
+        return
+    
+    ai_move = ai_player.make_move(game_logic)
+    
+    if not ai_move:
+        return
+    
+    row, col = ai_move
+    
+    game_logic.make_move(row, col, ai_player.player_color)
+    
+    db.update_game_board(game_id, game_logic.board, game_logic.current_player)
+    
+    moves = game_logic.get_valid_moves(game_logic.current_player)
+    black_score, white_score = game_logic.get_scores()
+    
+    text = f"Game #{game_id}\n\n"
+    text += f"⚫ {game['player1_name']}: {black_score}\n"
+    text += f"⚪ {ai_player.name}: {white_score}\n\n"
+    text += f"Turn: {game_logic.player_names[game_logic.current_player]}"
+    
+    keyboard = game_board_keyboard(game_id, moves, game_logic.board)
+    
+    if game_id in game_messages:
+        for player_id, message_id in game_messages[game_id].items():
+            try:
+                bot.edit_message_text(
+                    text,
+                    chat_id=player_id,
+                    message_id=message_id,
+                    reply_markup=keyboard
+                )
+            except:
+                pass
+    
+    if game_logic.is_game_over():
+        winner = game_logic.get_winner()
+        if winner == 0:
+            result = "Draw"
+            db.end_game(game_id, "draw")
+        else:
+            winner_name = game['player1_name'] if winner == 1 else ai_player.name
+            result = f"Winner: {winner_name}"
+            if winner == 1:
+                db.end_game(game_id, "player1")
+            else:
+                db.end_game(game_id, "player2")
+        
+        final_text = f"Game Over\n\n"
+        final_text += f"⚫ {game['player1_name']}: {black_score}\n"
+        final_text += f"⚪ {ai_player.name}: {white_score}\n\n"
+        final_text += result
+        
+        if game_id in game_messages:
+            for player_id, message_id in game_messages[game_id].items():
+                try:
+                    bot.edit_message_text(
+                        final_text,
+                        chat_id=player_id,
+                        message_id=message_id
+                    )
+                except:
+                    pass
+        
+        if game_id in ai_games:
+            del ai_games[game_id]
+    else:
+        if game_id in ai_games and game_logic.current_player == ai_player.player_color:
+            time.sleep(1)
+            make_ai_move(game_id, game_logic, game)
 
 def handle_status(call):
     _, game_id = call.data.split(":")
@@ -371,6 +538,9 @@ def handle_resign(call):
                 )
             except:
                 pass
+    
+    if game_id in ai_games:
+        del ai_games[game_id]
     
     bot.answer_callback_query(call.id, "Resigned")
 
